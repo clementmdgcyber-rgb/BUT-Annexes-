@@ -1,0 +1,7 @@
+const input = $input.first().json;
+const body  = input?.body || {};
+const limit = body.limit || 200;
+const mode  = body.mode  || 'report';
+const question = body.question || '';
+
+return [{ json: { limit, mode, question, source: input?.body ? 'webhook' : 'schedule' } }];
