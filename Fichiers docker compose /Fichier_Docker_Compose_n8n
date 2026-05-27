@@ -4,9 +4,9 @@ services:
     container_name: n8n-db
     restart: always
     environment:
-      - POSTGRES_USER=n8n_admin
-      - POSTGRES_PASSWORD=n8n_password
-      - POSTGRES_DB=n8n_db
+      - POSTGRES_USER=
+      - POSTGRES_PASSWORD=
+      - POSTGRES_DB=
       - POSTGRES_INITDB_ARGS=--encoding=UTF-8
     command:
       postgres
@@ -19,7 +19,7 @@ services:
     volumes:
       - ./postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U n8n_admin -d n8n_db"]
+      test: ["CMD-SHELL", "pg_isready -U  -d ]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -32,17 +32,17 @@ services:
 
   n8n:
     image: n8nio/n8n:latest
-    container_name: n8n-app
+    container_name: 
     restart: always
     ports:
       - "5678:5678"
     environment:
-      - DB_TYPE=postgresdb
-      - DB_POSTGRESDB_HOST=db
-      - DB_POSTGRESDB_PORT=5432
-      - DB_POSTGRESDB_USER=n8n_admin
-      - DB_POSTGRESDB_PASSWORD=n8n_password
-      - DB_POSTGRESDB_DATABASE=n8n_db
+      - DB_TYPE=
+      - DB_POSTGRESDB_HOST=
+      - DB_POSTGRESDB_PORT=
+      - DB_POSTGRESDB_USER=
+      - DB_POSTGRESDB_PASSWORD=
+      - DB_POSTGRESDB_DATABASE=
       - N8N_SECURE_COOKIE=false
       - N8N_HOST=n8n.eona-x.eu
       - N8N_PORT=5678
@@ -51,7 +51,6 @@ services:
       - N8N_BLOCK_SVG_TRANSFORMATION=false
       - GENERIC_TIMEZONE=Europe/Paris
       - TZ=Europe/Paris
-      - FILEBROWSER_URL=http://192.168.1.113:9090
       - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
       - EXECUTIONS_DATA_PRUNE=true
       - EXECUTIONS_DATA_MAX_AGE=30
