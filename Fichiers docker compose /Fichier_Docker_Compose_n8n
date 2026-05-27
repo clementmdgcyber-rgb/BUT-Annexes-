@@ -1,0 +1,104 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: n8n-db
+    restart: always
+    environment:
+      - POSTGRES_USER=n8n_admin
+      - POSTGRES_PASSWORD=n8n_password
+      - POSTGRES_DB=n8n_db
+      - POSTGRES_INITDB_ARGS=--encoding=UTF-8
+    command:
+      postgres
+      -c shared_buffers=256MB
+      -c effective_cache_size=512MB
+      -c max_connections=50
+      -c wal_level=minimal
+      -c max_wal_senders=0
+      -c synchronous_commit=off
+    volumes:
+      - ./postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U n8n_admin -d n8n_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - ai-network
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  n8n:
+    image: n8nio/n8n:latest
+    container_name: n8n-app
+    restart: always
+    ports:
+      - "5678:5678"
+    environment:
+      - DB_TYPE=postgresdb
+      - DB_POSTGRESDB_HOST=db
+      - DB_POSTGRESDB_PORT=5432
+      - DB_POSTGRESDB_USER=n8n_admin
+      - DB_POSTGRESDB_PASSWORD=n8n_password
+      - DB_POSTGRESDB_DATABASE=n8n_db
+      - N8N_SECURE_COOKIE=false
+      - N8N_HOST=n8n.eona-x.eu
+      - N8N_PORT=5678
+      - N8N_PROTOCOL=https
+      - WEBHOOK_URL=http://192.168.1.113/
+      - N8N_BLOCK_SVG_TRANSFORMATION=false
+      - GENERIC_TIMEZONE=Europe/Paris
+      - TZ=Europe/Paris
+      - FILEBROWSER_URL=http://192.168.1.113:9090
+      - N8N_DEFAULT_BINARY_DATA_MODE=filesystem
+      - EXECUTIONS_DATA_PRUNE=true
+      - EXECUTIONS_DATA_MAX_AGE=30
+      - EXECUTIONS_DATA_SAVE_ON_ERROR=all
+      - EXECUTIONS_DATA_SAVE_ON_SUCCESS=none
+      - EXECUTIONS_DATA_SAVE_MANUAL_EXECUTIONS=true
+      - N8N_LOG_LEVEL=warn
+    volumes:
+      - ./n8n_data:/home/node/.n8n
+      - ./logs:/logs:ro
+      - ./archives:/home/node/rapports_proxmox
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - ai-network
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+  webdav-server:
+    image: rclone/rclone:latest
+    container_name: webdav-reports
+    restart: always
+    ports:
+      - "8081:8081"
+    volumes:
+      - ./archives:/data:rw
+    command:
+      - serve
+      - webdav
+      - /data
+      - --addr
+      - :8081
+      - --user
+      - rtrt
+      - --pass
+      - rtrt
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+    networks:
+      - ai-network
+
+networks:
+  ai-network:
+    external: true
+    name: ai-network
