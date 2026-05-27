@@ -1,0 +1,3 @@
+const input = $input.first().json;
+const limit = input?.body?.limit || 200;
+return [{ json: { limit, source: input?.body ? 'webhook' : 'schedule' } }];
