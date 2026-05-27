@@ -88,9 +88,9 @@ services:
       - --addr
       - :8081
       - --user
-      - rtrt
+      - 
       - --pass
-      - rtrt
+      - 
     deploy:
       resources:
         limits:
