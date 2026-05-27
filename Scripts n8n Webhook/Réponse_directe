@@ -1,0 +1,135 @@
+const params = $('Parametres_de_recuperations3').first().json;
+const mode   = params.mode || 'report';
+const q      = (params.question || '').toLowerCase().trim();
+const d      = $('Analyser_agréger_données_Webhook1').first().json;
+
+const n  = d.node    || {};
+const nw = d.network || {};
+const sl = d.syslog  || {};
+const tk = d.tasks   || {};
+
+const ramPct  = n.memTotalGB  > 0 ? Math.round(n.memUsedGB  / n.memTotalGB  * 100) : 0;
+const swapPct = n.swapTotalGB > 0 ? Math.round(n.swapUsedGB / n.swapTotalGB * 100) : 0;
+const days    = Math.floor((n.uptimeH || 0) / 24);
+const hours   = (n.uptimeH || 0) % 24;
+const uptimeDisplay = days > 0 ? `${days}j ${hours}h` : `${hours}h`;
+
+const issues = [];
+if (n.cpuPercent > 80)              issues.push(`CPU élevé (${n.cpuPercent}%)`);
+if (ramPct > 85)                    issues.push(`RAM critique (${ramPct}%)`);
+if (swapPct > 50)                   issues.push(`Swap élevé (${swapPct}%)`);
+if ((nw.ports_down || 0) > 0)       issues.push(`${nw.ports_down} port(s) inactif(s)`);
+if ((tk.errors || []).length > 0)   issues.push(`${tk.errors.length} tâche(s) en erreur`);
+if ((sl.errors || []).length > 0)   issues.push(`${sl.errors.length} anomalie(s) syslog`);
+
+const risk = (n.cpuPercent > 80 || ramPct > 85 || (tk.errors || []).length > 2)
+  ? 'ÉLEVÉ 🔴' : issues.length > 0 ? 'MOYEN 🟡' : 'FAIBLE 🟢';
+
+const dateDisplay = new Date().toLocaleDateString('fr-FR', {
+  timeZone: 'Europe/Paris', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+});
+const timeDisplay = new Date().toLocaleTimeString('fr-FR', {
+  timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit'
+});
+
+if (mode === 'question') {
+  let answer = '';
+  if (/cpu|processeur/.test(q))
+    answer = `**CPU :** ${n.cpuPercent}% — ${n.cpuPercent > 80 ? '⚠️ Charge élevée' : '✅ Normal'}`;
+  else if (/\bram\b|m[eé]moire/.test(q))
+    answer = `**RAM :** ${n.memUsedGB}/${n.memTotalGB} Go (${ramPct}%) — ${ramPct > 85 ? '⚠️ Critique' : '✅ Normal'}`;
+  else if (/swap/.test(q))
+    answer = `**Swap :** ${n.swapUsedGB}/${n.swapTotalGB} Go (${swapPct}%) — ${swapPct > 50 ? '⚠️ Élevé' : '✅ Normal'}`;
+  else if (/syslog|log|erreur|warn/.test(q))
+    answer = `**Syslog :** ${sl.total_lines} lignes analysées, ${(sl.errors||[]).length} anomalie(s) détectée(s).`;
+  else if (/t[aâ]che|task|backup/.test(q))
+    answer = `**Tâches :** ${tk.total} au total, ${(tk.errors||[]).length} en erreur, ${(tk.backups||[]).length} sauvegarde(s).`;
+  else if (/r[eé]seau|port|interface|snmp/.test(q))
+    answer = `**Réseau :** ${nw.ports_up}/${nw.total_ports} interfaces actives, ${nw.ports_down} inactive(s).`;
+  else if (/uptime|disponib/.test(q))
+    answer = `**Uptime :** ${uptimeDisplay}`;
+  else if (/version|pve|proxmox|kernel/.test(q))
+    answer = `**PVE :** ${n.pveVersion} — **Kernel :** ${n.kversion}`;
+  else if (/[eé]tat|statut|sant[eé]|risque/.test(q))
+    answer = `**Risque global :** ${risk}${issues.length > 0 ? '\n\n' + issues.map(i => `- ${i}`).join('\n') : '\n\nAucune anomalie détectée.'}`;
+  else
+    answer = `**ipl-srv-03** — CPU: ${n.cpuPercent}% | RAM: ${ramPct}% | Swap: ${swapPct}% | Uptime: ${uptimeDisplay} | Ports: ${nw.ports_up}/${nw.total_ports} | Risque: ${risk}`;
+
+  const md = `> 🖥️ **Assistant ipl-srv-03** · ${dateDisplay} ${timeDisplay}\n\n**Question :** ${q || '(rapport général)'}\n\n${answer}`;
+  return [{ json: { report: md } }];
+}
+
+const alertesBlock = issues.length > 0
+  ? issues.map(i => `- ⚠️ ${i}`).join('\n')
+  : '- ✅ Aucune anomalie détectée';
+
+
+const ifLines = (nw.interfaces || []).map(iface =>
+  `| ${iface.name || '—'} | ${iface.isUp ? '🟢 Actif' : '🔴 Inactif'} | ${iface.speed || 'N/A'} | ${iface.inMB || 0} Mo | ${iface.outMB || 0} Mo |`
+).join('\n') || '| — | — | — | — | — |';
+
+const taskLines = (tk.recent || []).slice(0, 8).map(t => {
+  const icon = t.status === 'En cours' ? '🟡' : t.status === 'OK' ? '🟢' : '🔴';
+  return `| ${t.starttime} | ${t.type} | ${t.user} | ${icon} ${t.status} |`;
+}).join('\n') || '| — | — | — | — |';
+
+const syslogLines = (sl.errors || []).slice(0, 6).map(e =>
+  `| ${e.time || e.line || '—'} | \`${e.message.substring(0, 80)}\` |`
+).join('\n') || '| — | Aucune erreur critique détectée |';
+
+const md = `# Rapport de supervision — ipl-srv-03
+**${dateDisplay}** · ${timeDisplay} · Proxmox VE · Lourmel
+
+---
+
+## 🔰 Risque global : ${risk}
+
+${alertesBlock}
+
+---
+
+## Ressources serveur
+
+| Métrique | Valeur |
+|---|---|
+| CPU | **${n.cpuPercent || 0}%** |
+| Mémoire vive | **${ramPct}%** (${n.memUsedGB} / ${n.memTotalGB} Go) |
+| Swap | **${swapPct}%** (${n.swapUsedGB} / ${n.swapTotalGB} Go) |
+| Uptime | **${uptimeDisplay}** |
+| Kernel | ${n.kversion || 'N/A'} |
+| Proxmox VE | ${n.pveVersion || 'N/A'} |
+
+---
+
+## Interfaces réseau (SNMP)
+
+**${nw.ports_up || 0} actif(s)** · **${nw.ports_down || 0} inactif(s)** · ${nw.total_ports || 0} au total
+
+| Interface | État | Vitesse | Trafic entrant | Trafic sortant |
+|---|---|---|---|---|
+${ifLines}
+
+---
+
+## Tâches récentes
+
+**${tk.total || 0} tâches** · **${(tk.errors||[]).length} en erreur** · **${(tk.backups||[]).length} sauvegarde(s)**
+
+| Date | Type | Utilisateur | Statut |
+|---|---|---|---|
+${taskLines}
+
+---
+
+## Journaux système
+
+**${sl.total_lines || 0} lignes analysées** · **${(sl.errors||[]).length} anomalie(s)**
+
+| Référence | Message |
+|---|---|
+${syslogLines}
+
+---
+*ipl-srv-03 · Proxmox VE · Lourmel*`;
+
+return [{ json: { report: md } }];
