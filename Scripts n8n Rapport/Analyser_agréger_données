@@ -1,0 +1,143 @@
+let nodeStatus = {};
+try {
+  const raw = $('Status_ipl-srv-2').first().json;
+  nodeStatus = raw?.data || raw || {};
+} catch(e) { nodeStatus = {}; }
+
+const cpuPercent   = nodeStatus.cpu      ? parseFloat((nodeStatus.cpu * 100).toFixed(2)) : 0;
+const memUsedGB    = nodeStatus.memory?.used   ? parseFloat((nodeStatus.memory.used   / 1073741824).toFixed(2)) : 0;
+const memTotalGB   = nodeStatus.memory?.total  ? parseFloat((nodeStatus.memory.total  / 1073741824).toFixed(2)) : 0;
+const swapUsedGB   = nodeStatus.swap?.used     ? parseFloat((nodeStatus.swap.used     / 1073741824).toFixed(2)) : 0;
+const swapTotalGB  = nodeStatus.swap?.total    ? parseFloat((nodeStatus.swap.total    / 1073741824).toFixed(2)) : 0;
+const uptimeH      = nodeStatus.uptime         ? Math.floor(nodeStatus.uptime / 3600) : 0;
+const kversion     = nodeStatus.kversion       || 'N/A';
+const pveVersion   = nodeStatus.pveversion     || 'N/A';
+let syslogEntries = [];
+try {
+  const rawSyslog = $('Syslog_ipl-srv-').first().json;
+  const entries = rawSyslog?.data || rawSyslog || [];
+  const allEntries = Array.isArray(entries) ? entries : [];
+  const seen = new Set();
+  syslogEntries = allEntries.filter(e => {
+    const msg = (e.c || e.content || e.msg || '').trim();
+    const normalized = msg.replace(/\d{4}-\d{2}-\d{2}T[\d:.Z+-]+/g, 'TS')
+                          .replace(/\d+/g, 'N')
+                          .trim();
+    if (seen.has(normalized)) return false;
+    seen.add(normalized);
+    return true;
+  });
+} catch(e) { syslogEntries = []; }
+const syslogErrors = syslogEntries
+  .filter(e => {
+    const msg = (e.c || e.content || e.msg || '').toLowerCase();
+    return msg.includes('error') || msg.includes('critical') || msg.includes('fail') || msg.includes('warn');
+  })
+  .slice(0, 10)
+  .map(e => ({
+    time: e.t || e.time || null,
+    line: e.n || e.linenum || null,
+    message: e.c || e.content || e.msg || ''
+  }));
+const recentSyslog = syslogEntries
+  .slice(-5)
+  .map(e => e.c || e.content || e.msg || '');
+let taskList = [];
+try {
+  const rawTasks = $('Tasks_ipl-srv-').first().json;
+  const tasks = rawTasks?.data || rawTasks || [];
+  taskList = Array.isArray(tasks) ? tasks : [];
+} catch(e) { taskList = []; }
+
+const recentTasks = taskList.slice(0, 15).map(t => ({
+  upid     : t.upid || '',
+  type     : t.type || 'unknown',
+  // Proxmox : status = 'running' | 'stopped' / exitstatus = 'OK' | 'ERROR' | absent si running
+  running  : t.status === 'running',
+  status   : t.status === 'running' ? 'En cours' : (t.exitstatus || 'OK'),
+  user     : t.user || 'N/A',
+  starttime: t.starttime ? new Date(t.starttime * 1000).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : '—',
+  endtime  : t.endtime   ? new Date(t.endtime   * 1000).toLocaleString('fr-FR', { timeZone: 'Europe/Paris' }) : '—',
+  node     : t.node || 'ipl-srv-03'
+}));
+const taskErrors  = recentTasks.filter(t => !t.running && t.status !== 'OK');
+const taskBackups = recentTasks.filter(t => t.type && (t.type.includes('backup') || t.type.includes('vzdump')));
+let interfaces = [];
+try {
+  const snmpItems = $('SNMP1').all();
+  const allOids = snmpItems.map(i => i.json).flat();
+  const ifMap = {};
+  for (const entry of allOids) {
+    const oidStr = entry.oid || entry.OID || '';
+    const parts  = oidStr.split('.');
+    if (parts.length < 2) continue;
+    const colIdx = parts[parts.length - 2];
+    const ifIdx  = parts[parts.length - 1];
+    if (!ifMap[ifIdx]) ifMap[ifIdx] = { index: ifIdx };
+    const val = entry.value !== undefined ? entry.value : entry.Value;
+    switch(colIdx) {
+      case '2':  ifMap[ifIdx].name        = val; break;
+      case '5':  ifMap[ifIdx].speed       = val; break;
+      case '7':  ifMap[ifIdx].adminStatus = val == 1 ? 'up' : 'down'; break;
+      case '8':  ifMap[ifIdx].operStatus  = val == 1 ? 'up' : 'down'; break;
+      case '10': ifMap[ifIdx].inOctets    = val; break;
+      case '16': ifMap[ifIdx].outOctets   = val; break;
+    }
+  }
+  interfaces = Object.values(ifMap)
+    .filter(i => i.name && String(i.name).trim() !== '')
+    .map(i => ({
+      index      : i.index,
+      name       : i.name,
+      speed      : i.speed ? Math.round(i.speed / 1000000) + ' Mbps' : 'N/A',
+      adminStatus: i.adminStatus || 'N/A',
+      operStatus : i.operStatus  || 'N/A',
+      inMB       : i.inOctets  ? parseFloat((i.inOctets  / 1048576).toFixed(2)) : 0,
+      outMB      : i.outOctets ? parseFloat((i.outOctets / 1048576).toFixed(2)) : 0,
+      isUp       : i.operStatus === 'up'
+    }));
+} catch(e) { interfaces = []; }
+
+const portsUp   = interfaces.filter(i => i.isUp).length;
+const portsDown = interfaces.filter(i => !i.isUp).length;
+
+const today = new Date().toISOString().slice(0, 10);
+const dateDisplay = new Date().toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+
+return [{
+  json: {
+    date         : today,
+    dateDisplay  : dateDisplay,
+    timestamp    : new Date().toISOString(),
+    node: {
+      name        : 'ipl-srv-03',
+      label       : 'ipl-srv-03 (Réseau)',
+      cpu_percent : cpuPercent,
+      mem_used_gb : memUsedGB,
+      mem_total_gb: memTotalGB,
+      swap_used_gb: swapUsedGB,
+      swap_total_gb: swapTotalGB,
+      uptime_h    : uptimeH,
+      kversion    : kversion,
+      pve_version : pveVersion
+    },
+    syslog: {
+      total_lines : syslogEntries.length,
+      errors      : syslogErrors,
+      recent      : recentSyslog
+    },
+    tasks: {
+      total  : taskList.length,
+      recent : recentTasks,
+      errors : taskErrors,
+      backups: taskBackups
+    },
+    network: {
+      interfaces : interfaces,
+      ports_up   : portsUp,
+      ports_down : portsDown,
+      total_ports: interfaces.length
+    },
+    summary: `ipl-srv-03 — CPU: ${cpuPercent}% | RAM: ${memUsedGB}/${memTotalGB} Go | Uptime: ${uptimeH}h | Ports UP: ${portsUp}/${interfaces.length} | Erreurs syslog: ${syslogErrors.length}`
+  }
+}];
